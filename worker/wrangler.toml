@@ -1,0 +1,15 @@
+name = "glotok"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+
+[triggers]
+crons = ["*/10 * * * *"]
+
+[[kv_namespaces]]
+binding = "KV"
+id = "eb6df27f5e9b468dbd6ae6b579a31ee3"
+
+[vars]
+VAPID_PUBLIC = "BOEuneAXIFdXti7JO2YT6btqDplcm1-XZsJwUtC45Fy_UYIc_ksZtLR1Caq-gM3RsxgJ7_hlfjZKxlU0wUtAnm0"
+VAPID_SUBJECT = "https://zxcloxg.github.io/glotok/"
+# Секреты (APP_KEY, ADMIN_KEY, VAPID_PRIVATE_JWK) задаются через: npx wrangler secret put ИМЯ

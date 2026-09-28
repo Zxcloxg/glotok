@@ -1,0 +1,5 @@
+node_modules/
+secrets.local.json
+.wrangler/
+.dev.vars
+.claude/
