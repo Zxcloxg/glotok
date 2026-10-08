@@ -1,5 +1,5 @@
-const VERSION = 'glotok-v1';
-const SHELL = ['./', 'index.html', 'app.css', 'app.js', 'pets.js', 'config.js', 'manifest.webmanifest',
+const VERSION = 'glotok-v2';
+const SHELL = ['./', 'index.html', 'app.css', 'app.js', 'pets.js', 'foods.js', 'config.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', e => {

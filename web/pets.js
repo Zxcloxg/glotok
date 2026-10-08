@@ -39,6 +39,12 @@
       dachshund: ['Хлюп-хлюп-хлюп! Спасибо!'],
       cat: ['Лак-лак-лак. Ладно, признаю, было нужно.']
     },
+    hungry: {
+      otter: ['Животик урчит… Лера, ты сегодня кушала?', 'Выдры едят много раз в день. А ты?', 'Пахнет рыбкой… или мне кажется? Пора поесть!'],
+      weasel: ['Я голодная как волк. Пойдём покушаем?', 'Лер, без еды я не прыгаю. И ты тоже.', 'Урчит в животе так, что слышно соседям.'],
+      dachshund: ['Сижу у миски с самым грустным видом. Покушаем?', 'Пора кушать! Я даже хвостом виляю от голода.', 'Без еды у таксы кончается длина. Покорми нас!'],
+      cat: ['Я требую еды. И тебе тоже. Это не обсуждается.', 'Мяу. Время еды прошло, а миска пуста.', 'Смотрю на холодильник. Ты тоже посмотри.']
+    },
     sleeping: {
       otter: ['Сплю в обнимку с камушком. Доброй ночи, Лера.'],
       weasel: ['Сплю, свернувшись калачиком. Спокойной ночи!'],
@@ -55,7 +61,12 @@
     { id: 'hat',        slot: 'head', name: 'Шапочка',   days: 7 },
     { id: 'flowers',    slot: 'head', name: 'Венок',     days: 10 },
     { id: 'headphones', slot: 'head', name: 'Наушники',  days: 14 },
-    { id: 'crown',      slot: 'head', name: 'Корона',    days: 30 }
+    { id: 'crown',      slot: 'head', name: 'Корона',    days: 30 },
+    // Только в подарок из админки.
+    { id: 'heart',      slot: 'head', name: 'Заколка-сердце', gift: true },
+    { id: 'rose',       slot: 'head', name: 'Роза',       gift: true },
+    { id: 'bowtie',     slot: 'neck', name: 'Бабочка',    gift: true },
+    { id: 'tiara',      slot: 'head', name: 'Диадема',    gift: true }
   ];
 
   function shade(hex, amt) {
@@ -76,6 +87,10 @@
       const e = `<circle r="10" fill="${INK}"/><circle cx="3.5" cy="-3.5" r="3.6" fill="#fff"/><circle cx="-3" cy="3.5" r="1.6" fill="#fff" opacity=".8"/>`;
       return `<g class="eyes">${at(74, e)}${at(126, e)}</g>`;
     }
+    if (state === 'hungry') {
+      const e = `<circle r="12" fill="${INK}"/><circle cx="4" cy="-4" r="4.6" fill="#fff"/><circle cx="-4" cy="4" r="2.4" fill="#fff"/><circle cx="5" cy="4" r="1.4" fill="#fff" opacity=".8"/>`;
+      return `<g class="eyes">${at(74, e)}${at(126, e)}</g><path d="M62 84 L84 88 M138 84 L116 88" stroke="${INK}" stroke-width="3" stroke-linecap="round"/>`;
+    }
     if (state === 'thirsty') {
       const e = `<path d="M-10 0 A10 10 0 0 0 10 0 Z" fill="${INK}"/><circle cx="3" cy="3" r="2.2" fill="#fff"/><path d="M-11 -1 Q0 -4 11 -1" stroke="${INK}" stroke-width="3" fill="none" stroke-linecap="round"/>`;
       return at(74, e) + at(126, e);
@@ -95,6 +110,7 @@
     if (state === 'thirsty') return `<ellipse cx="100" cy="129" rx="7" ry="6" fill="${ink}"/><ellipse cx="100" cy="135" rx="5.5" ry="5" fill="#F07F8A"/>`;
     if (state === 'headache') return `<path d="M87 130 Q93 125 100 130 Q107 135 113 130" ${s}/>`;
     if (state === 'sleeping') return `<path d="M95 126 Q100 129 105 126" ${s}/>`;
+    if (state === 'hungry') return `<path d="M90 126 Q100 136 110 126 Z" fill="${ink}"/><path d="M108 129 q3 8 0 11 q-3 -3 0 -11z" fill="#9ED8F2"/>`;
     return `<circle cx="100" cy="127" r="3.5" fill="${ink}"/>`;
   }
   function tail(k, P, u) {
@@ -143,6 +159,10 @@
       .map(([x, y, c]) => `<g transform="translate(${x} ${y})">${[0, 72, 144, 216, 288].map(a => `<circle cx="${(6 * Math.cos(a * Math.PI / 180)).toFixed(1)}" cy="${(6 * Math.sin(a * Math.PI / 180)).toFixed(1)}" r="5" fill="${c}"/>`).join('')}<circle r="3.5" fill="#FFF6D6"/></g>`).join('')
       + `<path d="M62 66 Q100 36 138 66" stroke="#6DBF7B" stroke-width="3" fill="none" opacity=".8"/>`,
     headphones: `<path d="M42 100 Q42 34 100 34 Q158 34 158 100" fill="none" stroke="#3B3F4A" stroke-width="7" stroke-linecap="round"/><rect x="30" y="86" width="22" height="34" rx="10" fill="#F28AA0"/><rect x="148" y="86" width="22" height="34" rx="10" fill="#F28AA0"/>`,
+    heart: `<g transform="translate(140 54) rotate(15)"><path d="M0 7 C-15 -4 -8 -17 0 -9 C8 -17 15 -4 0 7Z" fill="#E4575B"/><path d="M-6 -9 q-3 3 -1 6" stroke="#fff" stroke-width="2" fill="none" opacity=".6" stroke-linecap="round"/></g>`,
+    rose: `<g transform="translate(144 60)"><path d="M-6 6 q-14 8 -17 -3 q10 -3 17 3z" fill="#5DAA62"/><circle r="12" fill="#D93B57"/><path d="M-7 -1 q7 -9 14 0 q-7 7 -14 0z M-3 3 q3 -4 6 0" stroke="#A5203A" stroke-width="2" fill="none"/></g>`,
+    bowtie: `<g transform="translate(100 156)"><path d="M0 0 L-21 -11 L-21 11 Z" fill="#7B5CC8"/><path d="M0 0 L21 -11 L21 11 Z" fill="#7B5CC8"/><rect x="-6" y="-7" width="12" height="14" rx="4" fill="#5E43A6"/></g>`,
+    tiara: `<path d="M64 60 Q100 30 136 60" fill="none" stroke="#C9D3E0" stroke-width="4" stroke-linecap="round"/><path d="M82 48 L89 30 L95 43 L100 22 L105 43 L111 30 L118 48" fill="#E6ECF5" stroke="#AFBBCB" stroke-width="2" stroke-linejoin="round"/><circle cx="100" cy="36" r="4" fill="#7FD0F0"/><circle cx="89" cy="40" r="2.5" fill="#F48FB1"/><circle cx="111" cy="40" r="2.5" fill="#F48FB1"/>`,
     crown: `<path d="M72 54 L76 26 L90 42 L100 20 L110 42 L124 26 L128 54 Z" fill="#F5C542" stroke="#D9A21B" stroke-width="2.5" stroke-linejoin="round"/><circle cx="100" cy="44" r="4.5" fill="#E4575B"/><circle cx="84" cy="48" r="3" fill="#6C8CD5"/><circle cx="116" cy="48" r="3" fill="#6C8CD5"/>`
   };
 
@@ -154,6 +174,10 @@
       <g transform="rotate(-12 100 46)"><rect x="70" y="34" width="60" height="24" rx="12" fill="#9ED8F2"/><rect x="70" y="34" width="60" height="24" rx="12" fill="none" stroke="#5FAFD4" stroke-width="2"/><path d="M76 42 h18" stroke="#fff" stroke-width="3" stroke-linecap="round" opacity=".8"/></g>
       <g class="spin"><path d="M100 -2 l3 7 7 3 -7 3 -3 7 -3 -7 -7 -3 7 -3z" fill="#FFC24D"/><circle cx="130" cy="36" r="4" fill="#FFC24D"/><circle cx="70" cy="36" r="3" fill="#FFC24D"/></g>
       <path d="M162 84 l12 -6 M165 96 h13 M162 108 l12 6" stroke="#E0685E" stroke-width="3.5" stroke-linecap="round"/>`;
+    if (state === 'hungry') return `
+      <g class="rumble" stroke="#E9A25E" stroke-width="3" fill="none" stroke-linecap="round"><path d="M46 158 q-6 6 0 12 M38 154 q-8 10 0 20"/><path d="M154 158 q6 6 0 12 M162 154 q8 10 0 20"/></g>
+      <g transform="translate(26 92) rotate(-14)"><rect x="-2" y="0" width="4" height="30" rx="2" fill="#AFBBCB"/><path d="M-7 -14 v10 q0 6 7 6 q7 0 7 -6 v-10 M0 -14 v10" stroke="#AFBBCB" stroke-width="3" fill="none" stroke-linecap="round"/></g>
+      <g transform="translate(174 92) rotate(14)"><rect x="-2" y="2" width="4" height="28" rx="2" fill="#AFBBCB"/><ellipse cx="0" cy="-6" rx="7" ry="10" fill="#AFBBCB"/></g>`;
     if (state === 'sleeping') return `<g class="zzz" fill="#8FA8D8" font-family="Comfortaa, Nunito, sans-serif" font-weight="700"><text x="148" y="54" font-size="22">z</text><text x="164" y="36" font-size="16">z</text><text x="176" y="22" font-size="11">z</text></g>`;
     return `
       <path d="M110 128 L122 150" stroke="#F0718A" stroke-width="4" stroke-linecap="round"/>
@@ -172,7 +196,8 @@
     const scale = opts.scale || 1;
     const cheeks = state === 'headache' ? '#C9B3B0' : '#F4978E';
     const paws = state === 'drinking' ? `<circle cx="78" cy="170" r="10" fill="${u('fur')}"/><circle cx="122" cy="170" r="10" fill="${u('fur')}"/>` : '';
-    const acc = slot => wear[slot] && ACC_SVG[wear[slot]] ? ACC_SVG[wear[slot]] : '';
+    const acc = slot => wear[slot] && ACC_SVG[wear[slot]] && !(slot === 'neck' && wear.neck === 'bowtie') ? ACC_SVG[wear[slot]] : '';
+    const bowtie = wear.neck === 'bowtie' ? ACC_SVG.bowtie : '';
     const hideHead = state === 'headache';
     const sx = k === 'dachshund' ? 118 : 100;
     return `<svg viewBox="-6 -8 212 223" role="img" aria-label="${opts.label || P.name}">
@@ -193,6 +218,7 @@
       ${eyes(state)}
       <ellipse cx="100" cy="113" rx="${k === 'dachshund' ? 10 : 8}" ry="${k === 'dachshund' ? 7 : 5.5}" fill="${P.nose}"/><ellipse cx="97" cy="111" rx="2.6" ry="1.6" fill="#fff" opacity=".6"/>
       ${mouth(state)}
+      ${bowtie}
       ${state === 'sleeping' ? '' : acc('face')}
       ${hideHead ? '' : acc('head')}
       ${extras(state)}

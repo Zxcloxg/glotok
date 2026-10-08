@@ -1,37 +1,37 @@
 // Сервер Глотка: хранит данные, отправляет напоминания и отдаёт письма.
 // Хранилище KV:
-//   state          — данные из приложения (настройки, записи, подписка на пуши)
-//   notify         — служебное: что и когда уже отправили
+//   state             — данные приложения (настройки, вода, еда, дела, подписка на пуши)
+//   notify            — служебное: какие напоминания уже отправлены
+//   gifts             — подарки из гардероба [{gid, id, note, at}]
 //   letter:YYYY-MM-DD — письмо на день
-//   signature      — подпись под письмами
+//   signature         — подпись под письмами
 
 const PET_NAMES = { otter: 'Выдра', weasel: 'Ласка', dachshund: 'Такса', cat: 'Кошка' };
+const ACC_NAMES = {
+  bow: 'Бантик', scarf: 'Шарфик', glasses: 'Очки', hat: 'Шапочка', flowers: 'Венок', headphones: 'Наушники', crown: 'Корона',
+  heart: 'Заколка-сердце', rose: 'Роза', bowtie: 'Бабочка', tiara: 'Диадема'
+};
 
-const MESSAGES = {
+const WATER = {
   1: {
-    otter: ['Лера, у меня пересохли усы. Выпьем по стаканчику?', 'Во рту как в пустыне. Может, водички?'],
+    otter: ['Лера, у меня пересохли усы. Выпьем по стаканчику?', 'Мы немного отстаём по воде. Может, водички?'],
     weasel: ['Лер, я хочу пить. Давай вместе по глоточку?', 'Чувствую себя сушёной лаской. Водички?'],
     dachshund: ['Лера, язык уже наружу. Водички?', 'Смотрю на тебя жалобными глазами. Попьём?'],
     cat: ['Моя миска пустая. Твой стакан, кажется, тоже.', 'Мяу. Это значит «вода». Перевожу.']
   },
   2: {
-    otter: ['Голова начинает болеть… Выдрам без воды совсем плохо. Налей стаканчик!', 'Лежу со льдом на голове. Лера, мне срочно надо попить.'],
+    otter: ['Голова начинает болеть… Мы сильно отстаём по воде. Налей стаканчик!', 'Лежу со льдом на голове. Лера, мне срочно надо попить.'],
     weasel: ['Ой, в висках стучит. Лера, мне срочно нужна вода!', 'Голова болит так, что даже вредничать не могу. Стаканчик?'],
     dachshund: ['Уши гудят, голова болит. Один стакан, и я снова виляю хвостом.', 'Хвост не виляет, голова тяжёлая. Воды бы…'],
     cat: ['Мрр… голова раскалывается. Даже обидеться сил нет. Попей воды.', 'Голова болит. Драматично падаю на диван. Нужна вода.']
-  },
-  3: {
-    otter: ['Лежу пластом с мокрым полотенцем на голове. Только вода меня спасёт!', 'Лера, я уже почти сушёная выдра. Стакан воды, срочно!'],
-    weasel: ['Я уже лежу с грелкой на голове. Лера, ну пожалуйста, стакан воды!', 'Всё кружится… Лер, спаси меня стаканом воды!'],
-    dachshund: ['Голова болит ужасно. Лежу на коврике и скулю. Спаси меня стаканом воды!', 'Лера, я очень-очень хочу пить. Правда. Один стакан!'],
-    cat: ['Всё, я падаю в обморок. Драматично. Прямо на клавиатуру. Попей воды!', 'Я бы сбросила что-нибудь со стола, но сил нет. Воды!']
-  },
-  morning: {
-    otter: ['Доброе утро, Лера! Начнём день со стакана воды?'],
-    weasel: ['Доброе утро! Прыг-скок к стакану воды?'],
-    dachshund: ['Доброе утро! Я уже проснулась и жду тебя со стаканом воды.'],
-    cat: ['Утро. Я проснулась. Ты тоже. Значит, пора пить воду.']
   }
+};
+const MEAL_Q = { breakfast: 'Ты сегодня завтракала?', lunch: 'Ты пообедала?', dinner: 'Ты поужинала?' };
+const HUNGRY = {
+  otter: ['У меня уже урчит в животике. Покушай, пожалуйста!', 'Выдры едят много раз в день. Давай и ты!'],
+  weasel: ['Я голодная, и ты наверняка тоже. Давай поедим чего-нибудь нормального!', 'Без еды я не прыгаю. Покушай, пожалуйста.'],
+  dachshund: ['Я уже сижу у миски и жду. Пойдём кушать!', 'Таксы без еды грустят. Покорми нас обеих!'],
+  cat: ['Я требую еды. И тебе тоже. Это не обсуждается.', 'Мяу. Время еды. Не заставляй меня скидывать вещи со стола.']
 };
 
 const CORS = {
@@ -41,6 +41,24 @@ const CORS = {
   'Access-Control-Max-Age': '86400'
 };
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', ...CORS } });
+const pick = list => list[Math.floor(Math.random() * list.length)];
+
+// ---------- слияние изменений от Леры и из админки ----------
+function mergeLWW(a = {}, aAt = {}, b = {}, bAt = {}) {
+  const out = { ...a }, at = { ...aAt };
+  for (const k of Object.keys(b)) if ((bAt[k] || 0) >= (aAt[k] || 0)) { out[k] = b[k]; at[k] = bAt[k] || aAt[k] || 0; }
+  return { settings: out, settingsAt: at };
+}
+function mergeTasks(a = [], b = []) {
+  const m = new Map(a.map(t => [t.id, t]));
+  for (const t of b) { const o = m.get(t.id); if (!o || (t.updatedAt || 0) >= (o.updatedAt || 0)) m.set(t.id, t); }
+  const now = Date.now();
+  return [...m.values()].filter(t => !(t.deleted && now - t.updatedAt > 30 * 864e5) && !(t.done && now - (t.doneAt || 0) > 60 * 864e5));
+}
+const reply = async (env, state) => ({
+  settings: state.settings, settingsAt: state.settingsAt || {}, tasks: state.tasks || [],
+  gifts: (await env.KV.get('gifts', 'json')) || [], signature: (await env.KV.get('signature')) || ''
+});
 
 export default {
   async fetch(req, env) {
@@ -51,19 +69,21 @@ export default {
     const isAdmin = !!env.ADMIN_KEY && req.headers.get('X-Admin-Key') === env.ADMIN_KEY;
 
     try {
-      if (p === '/' ) return json({ ok: true, name: 'glotok' });
+      if (p === '/') return json({ ok: true, name: 'glotok' });
 
       // --- приложение Леры ---
-      if (p.startsWith('/state') || p === '/letters' || p === '/test') {
+      if (p === '/state' || p === '/letters' || p === '/test') {
         if (!isApp) return json({ error: 'forbidden' }, 403);
         if (p === '/state' && req.method === 'GET') return json({ state: await env.KV.get('state', 'json') });
         if (p === '/state' && req.method === 'PUT') {
           const body = await req.json();
           const prev = (await env.KV.get('state', 'json')) || {};
+          const m = mergeLWW(prev.settings, prev.settingsAt, body.settings, body.settingsAt);
+          const state = { ...body, settings: m.settings, settingsAt: m.settingsAt, tasks: mergeTasks(prev.tasks, body.tasks) };
           // Подписку не затираем пустым значением: Safari и приложение с экрана «Домой» живут раздельно.
-          if (!body.sub && prev.sub) body.sub = prev.sub;
-          await env.KV.put('state', JSON.stringify(body));
-          return json({ ok: true });
+          if (!state.sub && prev.sub) state.sub = prev.sub;
+          await env.KV.put('state', JSON.stringify(state));
+          return json(await reply(env, state));
         }
         if (p === '/letters') {
           const today = url.searchParams.get('today') || '9999-12-31';
@@ -72,19 +92,22 @@ export default {
         if (p === '/test' && req.method === 'POST') {
           const state = await env.KV.get('state', 'json');
           if (!state?.sub) return json({ error: 'no subscription' }, 400);
-          const name = state.settings?.petName || 'Питомец';
-          const r = await sendPush(env, state.sub, { title: name, body: 'Привет, Лера! Я умею присылать уведомления. Не забывай пить воду!', tag: 'test' });
+          const r = await sendPush(env, state.sub, { title: state.settings?.petName || 'Питомец', body: 'Привет, Лера! Я умею присылать уведомления. Не забывай пить воду и кушать!', tag: 'test' });
           return json({ ok: r.ok, status: r.status });
         }
       }
 
-      // --- страница для писем ---
+      // --- админка ---
       if (p.startsWith('/admin')) {
         if (!isAdmin) return json({ error: 'forbidden' }, 403);
+        const state = (await env.KV.get('state', 'json')) || null;
+        const saveState = s => env.KV.put('state', JSON.stringify(s));
+
         if (p === '/admin/overview' && req.method === 'GET') {
-          const state = await env.KV.get('state', 'json');
-          const letters = await lettersUpTo(env, '9999-12-31');
-          return json({ state: summary(state), letters, signature: (await env.KV.get('signature')) || '' });
+          return json({
+            state: summary(state), letters: await lettersUpTo(env, '9999-12-31'),
+            signature: (await env.KV.get('signature')) || '', gifts: (await env.KV.get('gifts', 'json')) || []
+          });
         }
         if (p === '/admin/letter' && req.method === 'PUT') {
           const { date, text } = await req.json();
@@ -99,12 +122,42 @@ export default {
           return json({ ok: true });
         }
         if (p === '/admin/nudge' && req.method === 'POST') {
-          const state = await env.KV.get('state', 'json');
           if (!state?.sub) return json({ error: 'no subscription' }, 400);
           const { text } = await req.json().catch(() => ({}));
-          const name = state.settings?.petName || 'Питомец';
-          const r = await sendPush(env, state.sub, { title: name, body: text?.trim() || 'Лера, тебе передали: попей, пожалуйста, воды!', tag: 'nudge', badge: 1 });
+          const r = await sendPush(env, state.sub, { title: state.settings?.petName || 'Питомец', body: text?.trim() || 'Лера, тебе передали: попей, пожалуйста, воды!', tag: 'nudge', badge: 1 });
           return json({ ok: r.ok, status: r.status });
+        }
+        if (!state) return json({ error: 'Лера ещё не открывала приложение' }, 400);
+
+        if (p === '/admin/settings' && req.method === 'PUT') {
+          const { settings } = await req.json();
+          const allowed = ['goal', 'goalAuto', 'kcalGoal', 'kcalAuto', 'waterHours', 'mealsOn', 'meals', 'sleepStart', 'sleepEnd', 'interval'];
+          const now = Date.now();
+          state.settingsAt = state.settingsAt || {};
+          for (const k of allowed) if (k in settings) { state.settings[k] = settings[k]; state.settingsAt[k] = now; }
+          await saveState(state);
+          return json({ ok: true, state: summary(state) });
+        }
+        if (p === '/admin/task' && req.method === 'PUT') {
+          const { task } = await req.json();
+          if (!task?.id || !task.title && !task.deleted) return json({ error: 'bad task' }, 400);
+          const prev = (state.tasks || []).find(t => t.id === task.id);
+          const t = { ...(prev || { from: 'admin', createdAt: Date.now(), done: false, repeat: 'none' }), ...task, updatedAt: Date.now() };
+          state.tasks = mergeTasks(state.tasks, [t]);
+          await saveState(state);
+          return json({ ok: true, state: summary(state) });
+        }
+        if (p === '/admin/gift' && req.method === 'POST') {
+          const { id, note, remove } = await req.json();
+          if (!ACC_NAMES[id]) return json({ error: 'unknown item' }, 400);
+          let gifts = (await env.KV.get('gifts', 'json')) || [];
+          if (remove) gifts = gifts.filter(g => g.id !== id);
+          else if (!gifts.some(g => g.id === id)) {
+            gifts.push({ gid: id + '-' + Date.now().toString(36), id, note: String(note || '').slice(0, 300), at: Date.now() });
+            if (state.sub) await deliver(env, state, { title: 'Тебе подарок!', body: `${state.settings?.petName || 'Питомец'} получает: ${ACC_NAMES[id]}. Загляни в приложение.`, tag: 'gift', badge: 1 });
+          }
+          await env.KV.put('gifts', JSON.stringify(gifts));
+          return json({ ok: true, gifts });
         }
       }
       return json({ error: 'not found' }, 404);
@@ -144,77 +197,96 @@ function inQuiet(min, st) {
   if (a === b) return false;
   return a < b ? (min >= a && min < b) : (min >= a || min < b);
 }
+const sum = (list, f) => (list || []).reduce((a, x) => a + (x[f] || 0), 0);
 
 function summary(state) {
   if (!state) return null;
   const st = state.settings || {};
   const { date } = localNow(state.tz);
-  const today = (state.logs?.[date] || []).reduce((a, x) => a + x.ml, 0);
   let last = 0;
   for (const d in state.logs || {}) for (const x of state.logs[d]) last = Math.max(last, x.t);
   const days = [];
   for (let i = 6; i >= 0; i--) {
     const d = localNow(state.tz, new Date(Date.now() - i * 864e5)).date;
-    days.push({ date: d, ml: (state.logs?.[d] || []).reduce((a, x) => a + x.ml, 0), goal: state.goals?.[d] || st.goal });
+    days.push({ date: d, ml: sum(state.logs?.[d], 'ml'), goal: state.goals?.[d] || st.goal, kcal: sum(state.food?.[d], 'kcal') });
   }
-  return { pet: st.pet, petName: st.petName, goal: state.goals?.[date] || st.goal, today, date, last, days, notify: !!state.sub, tz: state.tz };
+  let level = 0;
+  for (const d in state.logs || {}) if (sum(state.logs[d], 'ml') >= (state.goals?.[d] || st.goal)) level++;
+  return {
+    pet: st.pet, petName: st.petName, date, goal: state.goals?.[date] || st.goal, today: sum(state.logs?.[date], 'ml'), last,
+    food: state.food?.[date] || [], kcalGoal: st.kcalGoal, days, goalDays: level, wear: state.wear || {},
+    tasks: (state.tasks || []).filter(t => !t.deleted), notify: !!state.sub, tz: state.tz,
+    settings: {
+      goal: st.goal, kcalGoal: st.kcalGoal, waterHours: st.waterHours || [11, 14, 17, 20], mealsOn: st.mealsOn !== false,
+      meals: st.meals || { breakfast: '10:30', lunch: '14:30', dinner: '19:30' }, sleepStart: st.sleepStart, sleepEnd: st.sleepEnd, interval: st.interval
+    }
+  };
 }
 
-// ---------- умные напоминания ----------
+// ---------- напоминания (раз в 5 минут) ----------
 async function checkReminders(env) {
   const state = await env.KV.get('state', 'json');
   if (!state?.sub || !state.settings) return;
   const st = state.settings;
   const now = Date.now();
   const { date, min } = localNow(state.tz);
-  if (inQuiet(min, st)) return;
-
-  const todayLogs = state.logs?.[date] || [];
-  const total = todayLogs.reduce((a, x) => a + x.ml, 0);
-  const goal = state.goals?.[date] || st.goal || 2000;
-  if (total >= goal) return;
-
-  let last = 0;
-  for (const d in state.logs || {}) for (const x of state.logs[d]) last = Math.max(last, x.t);
-  const sinceWake = (min - toMin(st.sleepEnd) + 1440) % 1440;
-  const wakeTs = now - sinceWake * 60000;
-  const base = Math.max(last, wakeTs);
-  const mins = (now - base) / 60000;
-  const iv = st.interval || 90;
-
-  let n = (await env.KV.get('notify', 'json')) || {};
   const pet = PET_NAMES[st.pet] ? st.pet : 'otter';
   const title = st.petName || PET_NAMES[pet];
-  const pick = list => list[Math.floor(Math.random() * list.length)];
 
-  // Утреннее «доброе утро», если ещё ничего не выпито.
-  if (!todayLogs.length && sinceWake >= 20 && sinceWake < 60 && n.morning !== date) {
-    n.morning = date;
-    await env.KV.put('notify', JSON.stringify(n));
-    await deliver(env, state, { title, body: pick(MESSAGES.morning[pet]), tag: 'thirst' });
-    return;
+  let n = (await env.KV.get('notify', 'json')) || {};
+  if (n.date !== date) n = { date, water: [], meals: [], tasks: n.tasks || {} };
+  n.tasks = n.tasks || {};
+  const queue = [];
+
+  // Дела: в назначенное время, даже ночью (время она ставит сама).
+  for (const t of state.tasks || []) {
+    if (t.deleted || t.done || !t.due || t.due > now || now - t.due > 6 * 36e5) continue;
+    if (n.tasks[t.id] === t.due) continue;
+    n.tasks[t.id] = t.due;
+    queue.push({ title, body: `Напоминаю: ${t.title}`, tag: 'task-' + t.id, badge: 1 });
+  }
+  // Чистим старые отметки о делах.
+  for (const id in n.tasks) if (now - n.tasks[id] > 7 * 864e5) delete n.tasks[id];
+
+  if (!inQuiet(min, st)) {
+    // Еда: если к назначенному времени приём пищи не отмечен.
+    if (st.mealsOn !== false) {
+      const meals = st.meals || { breakfast: '10:30', lunch: '14:30', dinner: '19:30' };
+      const food = state.food?.[date] || [];
+      for (const m of ['breakfast', 'lunch', 'dinner']) {
+        const T = toMin(meals[m]);
+        if (min < T || min >= T + 55 || n.meals.includes(m)) continue;
+        n.meals.push(m);
+        if (!food.some(x => x.meal === m)) queue.push({ title, body: `${MEAL_Q[m]} ${pick(HUNGRY[pet])}`, tag: 'meal', badge: 1 });
+      }
+    }
+    // Вода: только в выбранные часы и только если отстаёт от нормы.
+    const total = sum(state.logs?.[date], 'ml');
+    const goal = state.goals?.[date] || st.goal || 2000;
+    const wake = toMin(st.sleepEnd), sleep = toMin(st.sleepStart);
+    const awake = ((sleep - wake + 1440) % 1440) || 1440;
+    for (const h of st.waterHours || [11, 14, 17, 20]) {
+      if (min < h * 60 || min >= h * 60 + 55 || n.water.includes(h)) continue;
+      n.water.push(h);
+      if (total >= goal) continue;
+      const expected = goal * Math.min(1, ((min - wake + 1440) % 1440) / awake);
+      if (total < expected * 0.85) {
+        const level = total < expected * 0.5 ? 2 : 1;
+        queue.push({ title, body: pick(WATER[level][pet]), tag: 'thirst', badge: 1 });
+      }
+    }
   }
 
-  const level = mins >= iv * 2.5 ? 3 : mins >= iv * 1.75 ? 2 : mins >= iv ? 1 : 0;
-  if (!level) return;
-  if (n.base !== base) n = { ...n, base, level: 0, at: 0, repeats: 0 };
-
-  let send = false;
-  if (level > n.level) send = true;
-  else if (level === 3 && now - n.at >= iv * 60000 && (n.repeats || 0) < 3) { send = true; n.repeats = (n.repeats || 0) + 1; }
-  if (!send) return;
-
-  n.level = level; n.at = now;
   await env.KV.put('notify', JSON.stringify(n));
-  await deliver(env, state, { title, body: pick(MESSAGES[level][pet]), tag: 'thirst', badge: level });
+  for (const msg of queue) await deliver(env, state, msg);
 }
 
 async function deliver(env, state, payload) {
   const r = await sendPush(env, state.sub, payload);
   if (r.status === 404 || r.status === 410) {
     // Подписка больше не действует (приложение удалили или отключили уведомления).
-    state.sub = null;
-    await env.KV.put('state', JSON.stringify(state));
+    const cur = await env.KV.get('state', 'json');
+    if (cur && cur.sub?.endpoint === state.sub.endpoint) { cur.sub = null; await env.KV.put('state', JSON.stringify(cur)); }
   }
 }
 
