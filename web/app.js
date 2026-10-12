@@ -1,9 +1,11 @@
 (function () {
   const CFG = window.APP_CONFIG || {};
-  const { PETS, ACCESSORIES, ACC_SVG, drawPet, line } = window.Pets;
+  const { PETS, ACCESSORIES, ACC_SVG, drawPet, drawAway, line, STAGE_NAMES } = window.Pets;
   const FOODS = window.FOODS;
   const STORE = 'glotok-state-v1';
-  const VERSION = 2;
+  const VERSION = 3;
+  const STAGES = ['baby', 'young', 'adult'];
+  const STAGE_AT = [0, 10, 30]; // звёздочек до формы
   const NAME_IDEAS = {
     otter: ['Бублик', 'Выдруша', 'Пельмень'],
     weasel: ['Искорка', 'Шустрик', 'Ириска'],
@@ -29,12 +31,13 @@
     settingsAt: {},
     logs: {}, goals: {}, food: {}, customFoods: [], recentFoods: [], tasks: [],
     wear: { head: null, neck: null, face: null },
-    letters: {}, signature: '', seenLetter: '', gifts: [], seenGifts: [], sub: null, dirty: false
+    letters: {}, signature: '', seenLetter: '', gifts: [], seenGifts: [], sub: null, dirty: false,
+    trackFrom: '', seenStage: 0, away: null
   };
 
   let S = load();
   let tab = 'home', step = 0, drinkingUntil = 0, eatingUntil = 0, lastMood = '', showCustom = false, resetArmed = false;
-  let foodQuery = '', foodCat = '', sheet = null, taskWhen = 'none', taskCustom = '';
+  let foodQuery = '', foodCat = '', sheet = null, taskWhen = 'none', taskCustom = '', viewDay = null;
 
   // ---------- storage ----------
   function load() {
@@ -108,7 +111,7 @@
   }
   const levelInfo = () => {
     const g = goalDays(), level = 1 + Math.floor(g / 3);
-    return { g, level, next: 3 - g % 3, scale: 0.84 + Math.min(level - 1, 7) / 7 * 0.16 };
+    return { g, level, next: 3 - g % 3 };
   };
   function recommended(st = S.settings) {
     const add = { low: 0, mid: 300, high: 600 }[st.activity] || 0;
@@ -139,8 +142,32 @@
     return null;
   }
 
+  // ---------- формы и побег ----------
+  const foodMet = d => kcalOf(d) >= 0.8 * S.settings.kcalGoal;
+  function stars() {
+    let n = 0;
+    for (const d of new Set([...Object.keys(S.logs), ...Object.keys(S.food)])) { if (met(d)) n++; if (foodMet(d)) n++; }
+    return n;
+  }
+  function stageInfo() {
+    const s = stars(), idx = s >= STAGE_AT[2] ? 2 : s >= STAGE_AT[1] ? 1 : 0;
+    return { stars: s, idx, stage: STAGES[idx], name: STAGE_NAMES[S.settings.pet || 'otter'][idx], next: STAGE_AT[idx + 1] ?? null };
+  }
+  const dayBefore = i => { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() - i); return dkey(d); };
+  function awayInfo() {
+    if (!S.trackFrom) return null;
+    const today = dkey();
+    const missed = f => { for (let i = 1; i <= 3; i++) { const d = dayBefore(i); if (d < S.trackFrom || f(d)) return false; } return !f(today); };
+    const water = missed(met), food = missed(foodMet);
+    return water || food ? { water, food } : null;
+  }
+  const awayWhat = a => a.water && a.food ? 'воды и еды' : a.water ? 'воды' : 'еды';
+  const awayBack = a => a.water && a.food ? 'за один день ты выпьешь норму воды и нормально поешь' : a.water ? 'ты выпьешь норму воды за день' : 'ты нормально поешь за день';
+  const awayFix = a => a.water && a.food ? 'выполни сегодня норму воды и поешь хотя бы на 80% нормы' : a.water ? 'выпей сегодня норму воды' : 'поешь сегодня хотя бы на 80% нормы';
+
   function mood() {
     const now = Date.now();
+    if (awayInfo()) return 'away';
     if (now < drinkingUntil) return 'drinking';
     if (inQuiet(nowMin())) return 'sleeping';
     if (now < eatingUntil) return 'goal';
@@ -203,7 +230,7 @@
         method: 'PUT', body: JSON.stringify({
           settings: S.settings, settingsAt: S.settingsAt, logs: pick(S.logs), goals: pick(S.goals),
           food: pick(S.food), customFoods: S.customFoods, recentFoods: S.recentFoods, tasks: S.tasks,
-          wear: S.wear, sub: S.sub, tz: Intl.DateTimeFormat().resolvedOptions().timeZone, updatedAt: Date.now()
+          wear: S.wear, sub: S.sub, trackFrom: S.trackFrom, tz: Intl.DateTimeFormat().resolvedOptions().timeZone, updatedAt: Date.now()
         })
       });
       S.dirty = false;
@@ -231,7 +258,8 @@
         S = {
           ...S, settings: { ...DEFAULT.settings, ...state.settings }, settingsAt: state.settingsAt || {},
           logs: state.logs || {}, goals: state.goals || {}, food: state.food || {}, customFoods: state.customFoods || [],
-          recentFoods: state.recentFoods || [], tasks: state.tasks || [], wear: { ...S.wear, ...state.wear }, onboarded: true, v: VERSION
+          recentFoods: state.recentFoods || [], tasks: state.tasks || [], wear: { ...S.wear, ...state.wear }, onboarded: true, v: VERSION,
+          trackFrom: state.trackFrom || dkey(), seenStage: 2
         };
         save(); return true;
       }
@@ -290,18 +318,26 @@
   const clearBadge = () => { try { navigator.clearAppBadge && navigator.clearAppBadge().catch(() => { }); } catch (e) { } };
 
   // ---------- действия ----------
+  const dayK = () => viewDay || dkey();
+  // Время записи: для прошлого дня берём тот же час, что сейчас.
+  function stampFor(d, list) {
+    if (d === dkey()) return Date.now();
+    const n = new Date(), t0 = new Date(`${d}T${pad(n.getHours())}:${pad(n.getMinutes())}:00`).getTime();
+    let t = t0; while ((list || []).some(x => x.t === t)) t++;
+    return t;
+  }
   function addDrink(ml) {
     ml = Math.round(ml);
     if (!(ml > 0 && ml <= 3000)) { toast('Укажи объём от 1 до 3000 мл.'); return; }
-    const d = dkey(), t = Date.now();
+    const d = dayK(), t = stampFor(d, S.logs[d]);
     const wasMet = met(d);
     (S.logs[d] = S.logs[d] || []).push({ t, ml });
     if (!S.goals[d]) S.goals[d] = S.settings.goal;
-    drinkingUntil = t + 2600;
+    drinkingUntil = Date.now() + 2600;
     save(); render(); clearBadge(); sync();
-    toast(`+${ml} мл`, 'Отменить', () => removeDrink(d, t));
+    toast(`+${ml} мл${viewDay ? ' за ' + dateRu(d) : ''}`, 'Отменить', () => removeDrink(d, t));
     setTimeout(updateStage, 2700);
-    if (!wasMet && met(d) && S.seenLetter !== d) {
+    if (!viewDay && !wasMet && met(d) && S.seenLetter !== d) {
       S.seenLetter = d; save();
       setTimeout(() => openLetter(d, true), 1800);
     }
@@ -312,13 +348,13 @@
     drinkingUntil = 0; save(); render(); sync();
   }
   function addFood(entry, remember) {
-    const d = dkey(), t = Date.now();
+    const d = dayK(), t = stampFor(d, S.food[d]);
     (S.food[d] = S.food[d] || []).push({ t, ...entry });
     if (remember) S.recentFoods = [entry.name, ...S.recentFoods.filter(n => n !== entry.name)].slice(0, 12);
-    eatingUntil = t + 2600;
+    eatingUntil = Date.now() + 2600;
     closeModal(); foodQuery = ''; foodCat = '';
     save(); render(); clearBadge(); sync();
-    toast(`${MEALS[entry.meal]}: +${fmt(entry.kcal)} ккал`, 'Отменить', () => removeFood(d, t));
+    toast(`${MEALS[entry.meal]}: +${fmt(entry.kcal)} ккал${viewDay ? ' за ' + dateRu(d) : ''}`, 'Отменить', () => removeFood(d, t));
     setTimeout(updateStage, 2700);
   }
   function removeFood(d, t) {
@@ -368,6 +404,7 @@
     sheet = null;
     const fresh = S.gifts.find(g => !S.seenGifts.includes(g.gid));
     if (fresh) setTimeout(() => openGift(fresh), 300);
+    else setTimeout(checkEvents, 300);
   }
 
   const ICON = {
@@ -378,6 +415,7 @@
     wardrobe: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 11 4.5 7.5Q3 9.5 4.5 11.5L12 11l7.5.5q1.5-2 0-4L12 11Z"/><circle cx="12" cy="11" r="1.8" fill="currentColor"/><path d="M6 15h12M8 19h8" stroke-linecap="round"/></svg>',
     settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>',
     repeat: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 2l3 3-3 3M4 11V9a4 4 0 0 1 4-4h12M7 22l-3-3 3-3M20 13v2a4 4 0 0 1-4 4H4"/></svg>',
+    star: '<svg class="star" viewBox="0 0 24 24" width="14" height="14" fill="#F5B731" aria-label="звёздочек" style="vertical-align:-2px"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4-4.7-4.4 6.4-.8z"/></svg>',
     heart: '<svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true"><path d="M12 21s-8-5.2-8-11a4.5 4.5 0 0 1 8-2.8A4.5 4.5 0 0 1 20 10c0 5.8-8 11-8 11Z"/></svg>'
   };
   function cupSvg(ml) {
@@ -390,7 +428,7 @@
       ? `<svg viewBox="0 0 120 60" width="96" height="48" aria-hidden="true" style="align-self:center"><path d="M10 26 60 4l50 22v30H10Z" fill="#F3D9C6"/><rect x="22" y="12" width="76" height="38" rx="4" fill="#fff"/><path d="M34 24h52M34 32h40" stroke="#E0C9B8" stroke-width="3" stroke-linecap="round"/><path d="M10 26v30h100V26L60 44Z" fill="#F7C9B7"/><path d="M60 38c-4-6-12-2-8 4l8 7 8-7c4-6-4-10-8-4Z" fill="var(--rose)"/></svg>`
       : `<svg viewBox="0 0 52 40" aria-hidden="true"><rect x="2" y="4" width="48" height="32" rx="6" fill="#F7C9B7"/><path d="M4 8 26 24 48 8" fill="none" stroke="#E7A68E" stroke-width="3" stroke-linejoin="round"/><path d="M26 30c-2.5-3.5-7.5-1-5 2.5l5 4.5 5-4.5c2.5-3.5-2.5-6-5-2.5Z" fill="var(--rose)"/></svg>`;
   }
-  const petSvg = (state, extra = {}) => drawPet(S.settings.pet || 'otter', state, { wear: S.wear, scale: levelInfo().scale, label: S.settings.petName, ...extra });
+  const petSvg = (state, extra = {}) => drawPet(S.settings.pet || 'otter', state, { wear: S.wear, stage: stageInfo().stage, label: S.settings.petName, ...extra });
 
   function weekChart(vals, labels, goal, fmtVal, goalLabel, cls) {
     const max = Math.max(goal * 1.2, ...vals);
@@ -426,6 +464,7 @@
     const views = { home: homeView, history: historyView, food: foodView, tasks: tasksView, wardrobe: wardrobeView, settings: settingsView };
     app.innerHTML = `<main class="screen">${views[tab]()}</main>${tabbar()}`;
     lastMood = mood();
+    if (!sheet) setTimeout(checkEvents, 0);
   }
   function tabbar() {
     const t = [['home', 'Главная'], ['food', 'Еда'], ['tasks', 'Дела'], ['wardrobe', 'Питомец'], ['settings', 'Настройки']];
@@ -435,11 +474,25 @@
   }
   function stageHTML() {
     const m = mood();
+    const G = stageInfo();
+    if (m === 'away') {
+      const a = awayInfo();
+      return `<div class="bubble note">Записка: «Отправляюсь на поиски ${awayWhat(a)}. Вернусь, когда ${awayBack(a)}.»</div>
+        <div class="pet-svg">${drawAway(a.water ? 'water' : 'food')}</div>
+        <div class="petname"><b>${esc(S.settings.petName)}</b><span>сейчас не дома</span></div>`;
+    }
     const seed = Math.floor(Date.now() / 36e5) + (S.logs[dkey()] || []).length;
-    const L = levelInfo();
     return `<div class="bubble">${esc(line(m, S.settings.pet, seed))}</div>
       <div class="pet-svg">${petSvg(m)}</div>
-      <div class="petname"><b>${esc(S.settings.petName)}</b><span>уровень ${L.level}</span></div>`;
+      <div class="petname"><b>${esc(S.settings.petName)}</b><span>${esc(G.name.toLowerCase())}</span></div>`;
+  }
+  function daySwitch() {
+    const dk = dayK(), min = dayBefore(14);
+    const opts = [[0, 'Сегодня'], [1, 'Вчера'], [2, 'Позавчера']];
+    const custom = viewDay && ![dayBefore(1), dayBefore(2)].includes(viewDay);
+    return `<div class="dayswitch">${opts.map(([i, l]) => `<button data-day="${i}" aria-pressed="${dk === dayBefore(i)}">${l}</button>`).join('')}
+        <label class="daypick ${custom ? 'on' : ''}"><span>${custom ? dateRu(dk) : 'Другой день'}</span><input type="date" id="day-pick" min="${min}" max="${dkey()}" value="${dk}" aria-label="Выбрать день"></label></div>
+      ${viewDay ? `<p class="pastnote">Ты записываешь за <b>${dateRu(dk)}</b>. Всё, что добавишь, попадёт в этот день.</p>` : ''}`;
   }
   function updateStage() {
     const el = $('#stage');
@@ -457,13 +510,13 @@
   }
 
   function homeView() {
-    const d = dkey(), tot = total(d), goal = goalOf(d), pct = Math.min(100, Math.round(tot / goal * 100));
+    const d = dayK(), isToday = !viewDay, tot = total(d), goal = goalOf(d), pct = Math.min(100, Math.round(tot / goal * 100));
     const rest = Math.max(0, goal - tot), glasses = Math.ceil(rest / 250), last = lastDrink(), st = streak();
     const logs = (S.logs[d] || []).slice().reverse();
     const kc = kcalOf(d), kg = S.settings.kcalGoal, kp = Math.min(100, Math.round(kc / kg * 100));
-    const todayTasks = liveTasks().filter(t => !t.done && t.due && dkey(new Date(t.due)) <= d).sort((a, b) => a.due - b.due);
+    const todayTasks = liveTasks().filter(t => !t.done && t.due && dkey(new Date(t.due)) <= dkey()).sort((a, b) => a.due - b.due);
     let letter = '';
-    if (CFG.API) {
+    if (CFG.API && isToday) {
       letter = met(d)
         ? `<button class="card letter open" data-act="letter">${envelopeSvg()}<span class="t"><b>Письмо на сегодня</b><span class="muted">Норма выполнена. Нажми, чтобы прочитать.</span></span></button>`
         : `<div class="card letter">${envelopeSvg()}<span class="t"><b>Тебя ждёт письмо</b><span class="muted">Оно откроется, когда выпьешь ещё ${fmt(rest)} мл.</span></span></div>`;
@@ -471,22 +524,23 @@
     return `
       <header class="topbar"><h1>Привет, Лера</h1><span class="chip num" style="color:var(--accent)">${ICON.drop}<span style="color:var(--ink)">${days(st)} подряд</span></span></header>
       <section class="stage" id="stage">${stageHTML()}</section>
+      ${daySwitch()}
       <section class="progress">
         <div class="row"><span class="big">${fmt(tot)} <small>из ${fmt(goal)} мл</small></span><b class="num">${pct}%</b></div>
         <div class="bar ${tot >= goal ? 'done' : ''}"><i style="width:${pct}%"></i></div>
-        <div class="row hint"><span>${rest ? `Осталось ${fmt(rest)} мл, это около ${glasses} ${plural(glasses, ['стакана', 'стаканов', 'стаканов'])}` : 'Норма на сегодня выполнена'}</span><span>${last ? 'посл. ' + (dkey(new Date(last)) === d ? hm(last) : 'вчера') : ''}</span></div>
+        <div class="row hint"><span>${rest ? `Осталось ${fmt(rest)} мл, это около ${glasses} ${plural(glasses, ['стакана', 'стаканов', 'стаканов'])}` : (isToday ? 'Норма на сегодня выполнена' : 'Норма за этот день выполнена')}</span><span>${isToday && last ? 'посл. ' + (dkey(new Date(last)) === d ? hm(last) : 'вчера') : ''}</span></div>
       </section>
       <section class="cups">${S.settings.cups.map((ml, i) => `<button class="cup" id="cup-${i}" data-add="${ml}" aria-label="Выпила ${ml} мл">${cupSvg(ml)}<span>${ml}</span></button>`).join('')}</section>
       ${showCustom
         ? `<form class="custom-row" data-form="custom"><input class="input" id="custom-ml" type="number" inputmode="numeric" min="1" max="3000" placeholder="Сколько мл?" aria-label="Свой объём, мл"><button class="btn small" type="submit">Добавить</button></form>`
         : `<div class="linkrow"><button class="btn ghost small" data-act="custom">Другой объём</button><button class="btn soft small" data-tab="history">История воды</button></div>`}
       <button class="card linkcard" data-tab="food">
-        <div class="row"><b>Еда</b><span class="num">${fmt(kc)} из ${fmt(kg)} ккал</span></div>
-        <div class="bar food"><i style="width:${kp}%"></i></div>${mealChips()}</button>
+        <div class="row"><b>Еда${isToday ? '' : ' · ' + dateRu(d)}</b><span class="num">${fmt(kc)} из ${fmt(kg)} ккал</span></div>
+        <div class="bar food"><i style="width:${kp}%"></i></div>${mealChips(d)}</button>
       ${todayTasks.length ? `<button class="card linkcard" data-tab="tasks"><div class="row"><b>Дела на сегодня</b><span class="num">${todayTasks.length}</span></div>
         <ul class="mini-tasks">${todayTasks.slice(0, 3).map(t => `<li class="${t.due < Date.now() ? 'late' : ''}">${esc(t.title)}<span>${hm(t.due)}</span></li>`).join('')}</ul></button>` : ''}
       ${letter}
-      ${logs.length ? `<section class="card"><h2 class="section-title">Вода сегодня</h2><ul class="log">${logs.map(x => `<li><span><b>${x.ml} мл</b> <span class="muted">в ${hm(x.t)}</span></span><button class="x" data-del="${x.t}" aria-label="Удалить запись ${x.ml} мл">Удалить</button></li>`).join('')}</ul></section>` : ''}`;
+      ${logs.length ? `<section class="card"><h2 class="section-title">Вода ${isToday ? 'сегодня' : 'за ' + dateRu(d)}</h2><ul class="log">${logs.map(x => `<li><span><b>${x.ml} мл</b> <span class="muted">в ${hm(x.t)}</span></span><button class="x" data-del="${x.t}" aria-label="Удалить запись ${x.ml} мл">Удалить</button></li>`).join('')}</ul></section>` : ''}`;
   }
 
   function historyView() {
@@ -544,24 +598,25 @@
     return (recent.length ? `<p class="label">Недавние</p><div class="food-list">${recent.map(foodRow).join('')}</div>` : '') + `<p class="label">Категории</p>` + chips;
   }
   function foodView() {
-    const d = dkey(), kc = kcalOf(d), kg = S.settings.kcalGoal, kp = Math.min(100, Math.round(kc / kg * 100));
+    const d = dayK(), isToday = !viewDay, kc = kcalOf(d), kg = S.settings.kcalGoal, kp = Math.min(100, Math.round(kc / kg * 100));
     const entries = foodOf(d);
     const wk = lastWeek(), vals = wk.map(w => kcalOf(w.k));
-    const hungry = hungryMeal();
+    const hungry = isToday ? hungryMeal() : null;
     return `
       <header class="topbar"><h1>Еда</h1>${hungry ? `<span class="chip" style="color:var(--warn)">${MEALS[hungry]} не отмечен</span>` : ''}</header>
       <section class="progress">
         <div class="row"><span class="big">${fmt(kc)} <small>из ${fmt(kg)} ккал</small></span><b class="num">${kp}%</b></div>
         <div class="bar food"><i style="width:${kp}%"></i></div>
-        ${mealChips()}
-        <p class="hint">${kc >= kg ? 'На сегодня наелась. Молодец!' : `Осталось около ${fmt(kg - kc)} ккал, чтобы тебе хватило сил на день.`}</p>
+        ${mealChips(d)}
+        <p class="hint">${kc >= kg ? (isToday ? 'На сегодня наелась. Молодец!' : 'В этот день наелась.') : isToday ? `Осталось около ${fmt(kg - kc)} ккал, чтобы тебе хватило сил на день.` : `До нормы в этот день не хватило ${fmt(kg - kc)} ккал.`}</p>
       </section>
+      ${daySwitch()}
       <section class="card">
         <input class="input" id="food-q" type="search" placeholder="Что ты съела? Например, гречка" value="${esc(foodQuery)}" autocomplete="off" aria-label="Поиск еды">
         <div id="food-results">${foodResults()}</div>
         <button class="btn ghost small" style="align-self:center" data-act="food-custom">Нет в списке? Добавить своё</button>
       </section>
-      ${entries.length ? `<section class="card"><h2 class="section-title">Сегодня</h2>${['breakfast', 'lunch', 'dinner', 'snack'].filter(m => entries.some(x => x.meal === m)).map(m => `
+      ${entries.length ? `<section class="card"><h2 class="section-title">${isToday ? 'Сегодня' : dateRu(d)}</h2>${['breakfast', 'lunch', 'dinner', 'snack'].filter(m => entries.some(x => x.meal === m)).map(m => `
         <p class="label">${MEALS[m]}</p><ul class="log">${entries.filter(x => x.meal === m).map(x => `<li><span><b>${esc(x.name)}</b> <span class="muted">${x.g ? x.g + ' г · ' : ''}${fmt(x.kcal)} ккал</span></span><button class="x" data-delfood="${x.t}" aria-label="Удалить ${esc(x.name)}">Удалить</button></li>`).join('')}</ul>`).join('')}</section>` : ''}
       <section class="card chart"><h2 class="section-title">Калории за неделю</h2>
         ${weekChart(vals, wk.map(w => w.label), kg, v => (v / 1000).toFixed(1).replace('.', ','), `норма ${fmt(kg)}`, ' food')}
@@ -675,13 +730,14 @@
   // --- гардероб ---
   const unlocked = a => (a.days && goalDays() >= a.days) || S.gifts.some(g => g.id === a.id);
   function wardrobeView() {
-    const L = levelInfo();
+    const L = levelInfo(), G = stageInfo(), away = awayInfo();
     return `
-      <header class="topbar"><h1>${esc(S.settings.petName)}</h1><span class="chip num">уровень ${L.level}</span></header>
-      <section class="stage"><div class="pet-svg">${petSvg('happy')}</div>
-        <div class="petname"><b>${esc(PETS[S.settings.pet].name)}</b><span>${days(L.g)} с нормой воды</span></div></section>
-      <section class="level"><div class="bar"><i style="width:${(3 - L.next) / 3 * 100}%"></i></div>
-        <p class="hint">Ещё ${days(L.next)} с выполненной нормой, и ${esc(S.settings.petName)} подрастёт до уровня ${L.level + 1}.</p></section>
+      <header class="topbar"><h1>${esc(S.settings.petName)}</h1><span class="chip num">${G.stars} ${ICON.star}</span></header>
+      <section class="stage">${away ? `<div class="bubble note">Сейчас ${esc(S.settings.petName)} на поисках ${awayWhat(away)}. Чтобы вернуть, ${awayFix(away)}.</div><div class="pet-svg">${drawAway(away.water ? 'water' : 'food')}</div>` : `<div class="pet-svg">${petSvg('happy')}</div>`}
+        <div class="petname"><b>${esc(G.name)}</b><span>${G.next ? `до следующей формы ${G.next - G.stars} ${ICON.star}` : 'самая большая форма'}</span></div></section>
+      <section class="forms">${STAGES.map((st, i) => `<div class="form ${i === G.idx ? 'on' : i < G.idx ? 'past' : 'locked'}">${drawPet(S.settings.pet, 'happy', { stage: st })}<b>${esc(STAGE_NAMES[S.settings.pet][i])}</b><small>${i <= G.idx ? (i === G.idx ? 'сейчас' : 'пройдено') : `с ${STAGE_AT[i]} ${ICON.star}`}</small></div>`).join('')}</section>
+      ${G.next ? `<div class="bar"><i style="width:${Math.round((G.stars - STAGE_AT[G.idx]) / (G.next - STAGE_AT[G.idx]) * 100)}%"></i></div>` : ''}
+      <p class="hint">${ICON.star} за каждый день с нормой воды и ещё одна за каждый день, когда ты поела хотя бы на 80% нормы. Если 3 дня подряд не выполнять норму воды или еды, ${esc(S.settings.petName)} отправится их искать.</p>
       <h2 class="section-title">Гардероб</h2>
       <section class="wardrobe">${ACCESSORIES.map(a => {
         const open = unlocked(a), on = S.wear[a.slot] === a.id, gifted = S.gifts.some(g => g.id === a.id);
@@ -733,7 +789,7 @@
       <header class="topbar"><h1>Настройки</h1></header>
       <section class="card"><h2 class="section-title">Питомец</h2>
         <div class="field"><label for="set-name">Имя</label><input class="input" id="set-name" data-input="petName" maxlength="20" value="${esc(st.petName)}"></div>
-        <div class="pick-grid">${Object.keys(PETS).map(k => `<button class="pick-pet" data-set="pet:${k}" aria-pressed="${st.pet === k}">${drawPet(k, 'happy')}<b>${PETS[k].name}</b></button>`).join('')}</div>
+        <div class="pick-grid">${Object.keys(PETS).map(k => `<button class="pick-pet" data-set="pet:${k}" aria-pressed="${st.pet === k}">${drawPet(k, 'happy', { stage: stageInfo().stage })}<b>${PETS[k].name}</b></button>`).join('')}</div>
       </section>
       <section class="card"><h2 class="section-title">Вода</h2>${goalBlock(st)}${waterHoursBlock(st)}
         <div class="field"><span class="label">Питомец грустит, если не пила</span>
@@ -787,7 +843,7 @@
       next = `<button class="btn" data-ob="next">Познакомиться</button>`;
     } else if (step === 1) {
       body = `<h1>Кто будет жить с тобой?</h1>
-        <div class="pick-grid">${Object.keys(PETS).map(k => `<button class="pick-pet" data-obpet="${k}" aria-pressed="${st.pet === k}">${drawPet(k, st.pet === k ? 'goal' : 'happy')}<b>${PETS[k].name}</b><small>${PETS[k].trait}</small></button>`).join('')}</div>`;
+        <div class="pick-grid">${Object.keys(PETS).map(k => `<button class="pick-pet" data-obpet="${k}" aria-pressed="${st.pet === k}">${drawPet(k, st.pet === k ? 'goal' : 'happy', { stage: 'baby' })}<b>${PETS[k].name}</b><small>${PETS[k].trait}</small></button>`).join('')}</div>`;
       next = `<button class="btn" data-ob="next" ${st.pet ? '' : 'disabled'}>Дальше</button>`;
     } else if (step === 2) {
       body = `<div class="hero-pet">${drawPet(st.pet, 'happy')}</div>
@@ -816,10 +872,23 @@
     return `<div class="ob">${dots}<div class="grow">${body}</div><div class="actions">${next}${back}</div></div>`;
   }
   function finishOnboarding() {
-    S.onboarded = true; S.v = VERSION; save(); sync(); tab = 'home'; render();
+    S.onboarded = true; S.v = VERSION; S.trackFrom = dkey(); S.seenStage = 0; save(); sync(); tab = 'home'; render();
   }
   function whatsNew() {
     sheet = { type: 'news' };
+    if ((S.v || 1) >= 2) {
+      const G = stageInfo();
+      showModal(`<div class="sheet" role="dialog" aria-label="Что нового">
+        <div class="forms">${STAGES.map(st => drawPet(S.settings.pet, 'happy', { stage: st })).join('')}</div>
+        <h2>${esc(S.settings.petName)} теперь растёт</h2>
+        <ul class="steps">
+          <li><b>Три формы:</b> ${esc(STAGE_NAMES[S.settings.pet].join(', ').toLowerCase())}. За каждый день с нормой воды и за каждый день, когда ты нормально поела, даётся ${ICON.star}. С ${STAGE_AT[1]} ${ICON.star} юная форма, с ${STAGE_AT[2]} взрослая. У тебя уже ${G.stars}.</li>
+          <li><b>Не забывай о себе.</b> Если 3 дня подряд не выполнять норму воды или еды, ${esc(S.settings.petName)} отправится их искать. Чтобы вернуть, выполни эту норму за один день.</li>
+          <li><b>Записи за прошлые дни.</b> Забыла отметить вчера? На главной и в еде можно выбрать вчера, позавчера или другой день.</li>
+        </ul>
+        <button class="btn" data-act="news-ok">Понятно</button></div>`);
+      return;
+    }
     showModal(`<div class="sheet" role="dialog" aria-label="Что нового">
       <div class="hero-pet small">${petSvg('hungry')}</div>
       <h2>В Глотке теперь есть еда и дела</h2>
@@ -831,6 +900,29 @@
       <p class="muted">Чтобы посчитать, сколько тебе нужно есть, укажи рост и возраст.</p>
       ${foodBlock(S.settings)}
       <button class="btn" data-act="news-ok">Понятно</button></div>`);
+  }
+
+  // ---------- рост и побег: показываем один раз ----------
+  function checkEvents() {
+    if (!S.onboarded || sheet || (S.v || 1) < VERSION) return;
+    const G = stageInfo(), away = awayInfo(), name = esc(S.settings.petName);
+    let html = '';
+    if (away && !S.away) {
+      S.away = away;
+      html = `<div class="pet-svg">${drawAway(away.water ? 'water' : 'food')}</div><h2>${name} отправляется на поиски ${awayWhat(away)}</h2>
+        <p>Три дня подряд норма ${awayWhat(away)} не выполнялась. Чтобы вернуть ${name} домой, ${awayFix(away)}.</p>`;
+    } else if (!away && S.away) {
+      S.away = null;
+      html = `<div class="pet-svg">${petSvg('goal')}</div><h2>${name} снова дома!</h2><p>Спасибо, что позаботилась о себе. Постарайся не пропускать воду и еду.</p>`;
+    } else if (G.idx > (S.seenStage || 0)) {
+      S.seenStage = G.idx;
+      html = `<div class="forms two">${drawPet(S.settings.pet, 'happy', { stage: STAGES[G.idx - 1], wear: S.wear })}${drawPet(S.settings.pet, 'goal', { stage: G.stage, wear: S.wear })}</div>
+        <h2>${name} подрастает!</h2><p>Новая форма: <b>${esc(G.name.toLowerCase())}</b>. Это всё благодаря тому, что ты пьёшь воду и нормально ешь.</p>`;
+    } else if (G.idx < (S.seenStage || 0)) S.seenStage = G.idx;
+    if (!html) { save(); return; }
+    save(); sync();
+    sheet = { type: 'event' };
+    showModal(`<div class="sheet event" role="dialog">${html}<button class="btn" data-act="close">Хорошо</button></div>`);
   }
 
   // ---------- события ----------
@@ -885,6 +977,7 @@
     if (!b) { if (e.target.id === 'modal') closeModal(); return; }
     const ds = b.dataset;
     if (ds.toast) { $('#toast').hidden = true; toastAction && toastAction(); return; }
+    if (ds.day != null) { const k = dayBefore(+ds.day); viewDay = k === dkey() ? null : k; render(); return; }
     if (ds.tab) { tab = ds.tab; resetArmed = false; showCustom = false; render(); window.scrollTo(0, 0); return; }
     if (ds.add) { addDrink(+ds.add); return; }
     if (ds.del) { const t = +ds.del; removeDrink(dkey(new Date(t)), t); return; }
@@ -943,7 +1036,7 @@
       case 'letter': openLetter(dkey(), false); break;
       case 'browser': S.browserOk = true; save(); render(); break;
       case 'food-custom': openCustomSheet(); break;
-      case 'news-ok': S.v = VERSION; save(); sync(); closeModal(); render(); break;
+      case 'news-ok': S.v = VERSION; save(); sync(); closeModal(); render(); checkEvents(); break;
       case 'gift-close': closeModal(); break;
       case 'gift-wear': {
         const a = ACCESSORIES.find(x => x.id === sheet.g.id);
@@ -986,6 +1079,7 @@
   document.addEventListener('change', e => {
     const el = e.target, k = el.dataset.input;
     if (k === 'petName') { if (S.onboarded) sync(); return; }
+    if (el.id === 'day-pick') { const v = el.value; if (v && v <= dkey() && v >= dayBefore(14)) { viewDay = v === dkey() ? null : v; render(); } return; }
     if (k === 'sleepStart' || k === 'sleepEnd') { if (el.value) { setS(k, el.value); save(); if (S.onboarded) sync(); } return; }
     if (el.dataset.mealtime) { if (el.value) { setS('meals', { ...S.settings.meals, [el.dataset.mealtime]: el.value }); save(); if (S.onboarded) sync(); } return; }
     if (el.dataset.cup != null) {
@@ -1033,6 +1127,7 @@
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible' || !S.onboarded) return;
     clearBadge();
+    if (viewDay && !sheet) viewDay = null;
     if ((tab === 'home' || tab === 'tasks') && !sheet && !editing()) render();
     pushState();
     refreshSub();
@@ -1050,9 +1145,11 @@
     if (S.onboarded) {
       clearBadge();
       if ((S.v || 1) < VERSION) {
-        S.settings.kcalGoal = kcalRecommended(); save();
+        if ((S.v || 1) < 2) S.settings.kcalGoal = kcalRecommended();
+        if (!S.trackFrom) S.trackFrom = dkey();
+        S.seenStage = 0; save();
         whatsNew();
-      }
+      } else checkEvents();
       pushState();
       refreshSub();
       await fetchLetters();

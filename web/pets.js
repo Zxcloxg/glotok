@@ -81,8 +81,8 @@
   }
 
   const INK = '#1D1718';
-  function eyes(state) {
-    const at = (x, inner) => `<g transform="translate(${x} 100)">${inner}</g>`;
+  function eyes(state, es = 1) {
+    const at = (x, inner) => `<g transform="translate(${x} 100) scale(${es})">${inner}</g>`;
     if (state === 'happy' || state === 'goal') {
       const e = `<circle r="10" fill="${INK}"/><circle cx="3.5" cy="-3.5" r="3.6" fill="#fff"/><circle cx="-3" cy="3.5" r="1.6" fill="#fff" opacity=".8"/>`;
       return `<g class="eyes">${at(74, e)}${at(126, e)}</g>`;
@@ -187,35 +187,52 @@
   }
 
   let uid = 0;
-  // opts: { wear: {head, neck, face}, scale }
+  // Три формы: малыш, юная, взрослая. Пропорции головы и тела меняются.
+  const STAGE = {
+    baby:  { body: 0.72, head: 0.98, hy: 24, eye: 1.22, k: 0.8 },
+    young: { body: 1,    head: 1,    hy: 0,  eye: 1,    k: 0.9 },
+    adult: { body: 1.12, head: 0.92, hy: -5, eye: 0.95, k: 1 }
+  };
+  const STAGE_NAMES = {
+    otter: ['Выдрёнок', 'Юная выдра', 'Взрослая выдра'],
+    weasel: ['Ласочка-малышка', 'Юная ласка', 'Взрослая ласка'],
+    dachshund: ['Щенок таксы', 'Юная такса', 'Взрослая такса'],
+    cat: ['Котёнок', 'Юная кошка', 'Взрослая кошка']
+  };
+  // opts: { wear: {head, neck, face}, stage: 'baby'|'young'|'adult', label }
   function drawPet(k, state, opts = {}) {
     const P = PETS[k] || PETS.otter;
     const id = 'p' + (++uid);
     const u = n => `url(#${id}-${n})`;
     const wear = opts.wear || {};
-    const scale = opts.scale || 1;
+    const G = STAGE[opts.stage] || STAGE.young;
+    const scale = G.k;
     const cheeks = state === 'headache' ? '#C9B3B0' : '#F4978E';
     const paws = state === 'drinking' ? `<circle cx="78" cy="170" r="10" fill="${u('fur')}"/><circle cx="122" cy="170" r="10" fill="${u('fur')}"/>` : '';
     const acc = slot => wear[slot] && ACC_SVG[wear[slot]] && !(slot === 'neck' && wear.neck === 'bowtie') ? ACC_SVG[wear[slot]] : '';
     const bowtie = wear.neck === 'bowtie' ? ACC_SVG.bowtie : '';
     const hideHead = state === 'headache';
     const sx = k === 'dachshund' ? 118 : 100;
+    const bodyT = `translate(${100 - 100 * G.body} ${205 - 205 * G.body}) scale(${G.body})`;
+    const headT = `translate(${100 - 100 * G.head} ${100 - 100 * G.head + G.hy}) scale(${G.head})`;
+    const curl = opts.stage === 'baby' ? `<path d="M93 50 q-5 -13 7 -14 q9 1 4 10" stroke="${P.dark}" stroke-width="4.5" fill="none" stroke-linecap="round"/>` : '';
     return `<svg viewBox="-6 -8 212 223" role="img" aria-label="${opts.label || P.name}">
     <defs>${grad(id + '-fur', P.fur)}${grad(id + '-light', P.light)}${grad(id + '-dark', P.dark)}
       <filter id="${id}-sh" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#0B2530" flood-opacity=".18"/></filter></defs>
-    <ellipse cx="${sx}" cy="206" rx="${(k === 'dachshund' ? 80 : 56) * scale}" ry="7" fill="#0B2530" opacity=".13"/>
+    <ellipse cx="${sx}" cy="206" rx="${(k === 'dachshund' ? 80 : 56) * scale * G.body}" ry="7" fill="#0B2530" opacity=".13"/>
     <g transform="translate(${100 - 100 * scale} ${205 - 205 * scale}) scale(${scale})">
     <g class="pet ${state}" filter="url(#${id}-sh)">
-      ${tail(k, P, u)}
-      ${body(k, P, u)}
+      <g transform="${bodyT}">${tail(k, P, u)}${body(k, P, u)}</g>
+      <g transform="${headT}">
       ${acc('neck')}
       ${earsBack(k, P, u)}
       <ellipse cx="100" cy="100" rx="${k === 'weasel' ? 56 : 62}" ry="54" fill="${u('fur')}"/>
       ${face(k, P, u)}
       ${earsFront(k, P, u)}
+      ${curl}
       <ellipse cx="74" cy="70" rx="20" ry="11" transform="rotate(-25 74 70)" fill="#fff" opacity=".28"/>
-      <ellipse cx="60" cy="118" rx="10" ry="6" fill="${cheeks}" opacity=".55"/><ellipse cx="140" cy="118" rx="10" ry="6" fill="${cheeks}" opacity=".55"/>
-      ${eyes(state)}
+      <ellipse cx="60" cy="118" rx="10" ry="6" fill="${cheeks}" opacity="${opts.stage === 'baby' ? .8 : .55}"/><ellipse cx="140" cy="118" rx="10" ry="6" fill="${cheeks}" opacity="${opts.stage === 'baby' ? .8 : .55}"/>
+      ${eyes(state, G.eye)}
       <ellipse cx="100" cy="113" rx="${k === 'dachshund' ? 10 : 8}" ry="${k === 'dachshund' ? 7 : 5.5}" fill="${P.nose}"/><ellipse cx="97" cy="111" rx="2.6" ry="1.6" fill="#fff" opacity=".6"/>
       ${mouth(state)}
       ${bowtie}
@@ -223,7 +240,22 @@
       ${hideHead ? '' : acc('head')}
       ${extras(state)}
       ${paws}
+      </g>
     </g></g></svg>`;
+  }
+
+  // Пустое место, когда питомец ушёл: миска и следы лапок.
+  function drawAway(reason) {
+    const water = reason !== 'food';
+    const paw = (x, y, r) => `<g transform="translate(${x} ${y}) rotate(${r})" fill="#8C7A6B" opacity=".55"><ellipse cx="0" cy="3" rx="5" ry="4"/><circle cx="-5" cy="-4" r="2"/><circle cx="0" cy="-6" r="2"/><circle cx="5" cy="-4" r="2"/></g>`;
+    return `<svg viewBox="-6 -8 212 223" role="img" aria-label="Питомец ушёл">
+      <ellipse cx="60" cy="196" rx="40" ry="6" fill="#0B2530" opacity=".12"/>
+      <path d="M26 170 h68 l-8 24 h-52 z" fill="#E7EEF2" stroke="#AFBBCB" stroke-width="2.5" stroke-linejoin="round"/>
+      <path d="M30 170 h60" stroke="${water ? '#9ED8F2' : '#E9C79A'}" stroke-width="4" stroke-linecap="round" opacity=".5"/>
+      ${paw(112, 186, 70)}${paw(132, 176, 80)}${paw(150, 186, 70)}${paw(170, 174, 80)}${paw(190, 184, 70)}
+      <g transform="translate(118 92) rotate(6)"><rect x="-34" y="-30" width="68" height="56" rx="6" fill="#FFFBF3" stroke="#E7D8C2" stroke-width="2"/>
+        <path d="M-22 -14 h44 M-22 -2 h36 M-22 10 h40" stroke="#C9B8A2" stroke-width="3" stroke-linecap="round"/><circle cx="0" cy="-30" r="4" fill="#E86F8E"/></g>
+    </svg>`;
   }
 
   function line(state, k, seed) {
@@ -231,5 +263,5 @@
     return list[Math.abs(seed | 0) % list.length];
   }
 
-  window.Pets = { PETS, LINES, ACCESSORIES, drawPet, line, ACC_SVG };
+  window.Pets = { PETS, LINES, ACCESSORIES, drawPet, drawAway, line, ACC_SVG, STAGE_NAMES };
 })();

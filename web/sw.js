@@ -1,4 +1,4 @@
-const VERSION = 'glotok-v2';
+const VERSION = 'glotok-v3';
 const SHELL = ['./', 'index.html', 'app.css', 'app.js', 'pets.js', 'foods.js', 'config.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/apple-touch-icon.png'];
 

@@ -104,7 +104,11 @@
       const kc = s.food.reduce((a, x) => a + x.kcal, 0);
       const days = s.days.map(d => ({ ...d, kgoal: s.kcalGoal }));
       const open = s.tasks.filter(t => !t.done), late = open.filter(t => t.due && t.due < Date.now());
+      const P2 = s.pet2 || { stars: 0, stage: 'малыш', stageKey: 'baby' };
       return `
+        <section class="card" style="align-items:center;text-align:center"><div class="pet-mini">${P2.away ? Pets.drawAway(P2.away.water ? 'water' : 'food') : drawPet(s.pet || 'otter', 'happy', { wear: s.wear, stage: P2.stageKey })}</div>
+          <b>${esc(s.petName)} · ${P2.stage}</b><p class="hint">Звёздочек: ${P2.stars}. ${P2.stars < 10 ? `До юной формы ещё ${10 - P2.stars}.` : P2.stars < 30 ? `До взрослой формы ещё ${30 - P2.stars}.` : 'Самая большая форма.'}</p>
+          ${P2.away ? `<p class="status bad">Сейчас не дома, ищет ${P2.away.water && P2.away.food ? 'воду и еду' : P2.away.water ? 'воду' : 'еду'}. Вернётся, когда Лера выполнит эту норму за день.</p>` : ''}</section>
         <section class="card"><h2 class="section-title">Вода</h2>
           <div class="setrow"><span>${esc(s.petName)} <span class="muted">· сегодня</span></span><b class="num">${fmt(s.today)} из ${fmt(s.goal)} мл</b></div>
           <div class="bar ${s.today >= s.goal ? 'done' : ''}"><i style="width:${Math.min(100, s.today / s.goal * 100)}%"></i></div>
@@ -151,7 +155,7 @@
     function gifts() {
       const s = data.state;
       return `
-        <section class="card" style="align-items:center"><div class="pet-mini">${drawPet(s.pet || 'otter', 'happy', { wear: s.wear })}</div>
+        <section class="card" style="align-items:center"><div class="pet-mini">${drawPet(s.pet || 'otter', 'happy', { wear: s.wear, stage: s.pet2 ? s.pet2.stageKey : 'young' })}</div>
           <p class="hint">Так ${esc(s.petName)} выглядит сейчас. Дней с нормой воды: ${s.goalDays}.</p></section>
         <p class="hint">Подарок сразу открывается у Леры, ей приходит уведомление, а в приложении появляется открытка с твоей запиской. Последние четыре вещи бывают только в подарок.</p>
         <section class="gift-grid">${ACCESSORIES.map(a => {

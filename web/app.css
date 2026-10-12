@@ -281,3 +281,26 @@ p { margin: 0; }
   .cups { gap: 6px; }
   .stats b { font-size: 20px; }
 }
+
+/* прошлые дни */
+.dayswitch { display: flex; flex-wrap: wrap; gap: 6px; }
+.dayswitch button, .daypick { border: 0; border-radius: 999px; padding: 8px 12px; font-size: 14px; font-weight: 700; background: var(--accent-soft); color: var(--ink); }
+.dayswitch button[aria-pressed="true"], .daypick.on { background: var(--accent); color: var(--accent-ink); }
+.daypick { position: relative; display: inline-flex; align-items: center; cursor: pointer; }
+.daypick input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+.pastnote { background: var(--food-soft); color: var(--ink); border-radius: 14px; padding: 10px 14px; font-size: 14px; }
+
+/* формы питомца */
+.bubble.note { background: var(--paper); color: var(--paper-ink); font-style: italic; }
+.forms { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; align-items: end; }
+.forms.two { grid-template-columns: 1fr 1fr; }
+.forms svg { width: 100%; height: auto; display: block; }
+.forms svg.star, .chip svg.star { width: 14px; height: 14px; display: inline-block; }
+.form { background: var(--surface); border-radius: 18px; box-shadow: var(--shadow); padding: 8px 6px 10px; display: flex; flex-direction: column; align-items: center; gap: 2px; text-align: center; border: 3px solid transparent; }
+.form b { font-size: 13px; line-height: 1.2; }
+.form small { font-size: 12px; color: var(--muted); font-weight: 700; }
+.form.on { border-color: var(--accent); background: var(--accent-soft); }
+.form.locked svg { filter: grayscale(1) brightness(1.1); opacity: .35; }
+.sheet.event { text-align: center; align-items: stretch; }
+.sheet.event .pet-svg { width: 60%; max-width: 220px; align-self: center; }
+.sheet.event .pet-svg svg { width: 100%; height: auto; }

@@ -199,6 +199,30 @@ function inQuiet(min, st) {
 }
 const sum = (list, f) => (list || []).reduce((a, x) => a + (x[f] || 0), 0);
 
+// Звёздочки, форма питомца и побег (та же логика, что в приложении).
+const STAGE_NAMES = ['малыш', 'юная форма', 'взрослая форма'];
+function petStatus(state) {
+  const st = state.settings || {};
+  const wMet = d => sum(state.logs?.[d], 'ml') >= (state.goals?.[d] || st.goal || 2000);
+  const fMet = d => sum(state.food?.[d], 'kcal') >= 0.8 * (st.kcalGoal || 1800);
+  let stars = 0;
+  for (const d of new Set([...Object.keys(state.logs || {}), ...Object.keys(state.food || {})])) { if (wMet(d)) stars++; if (fMet(d)) stars++; }
+  const idx = stars >= 30 ? 2 : stars >= 10 ? 1 : 0;
+  let away = null;
+  if (state.trackFrom) {
+    const today = localNow(state.tz).date;
+    const missed = f => {
+      for (let i = 1; i <= 3; i++) { const d = localNow(state.tz, new Date(Date.now() - i * 864e5)).date; if (d < state.trackFrom || f(d)) return false; }
+      return !f(today);
+    };
+    const water = missed(wMet), food = missed(fMet);
+    if (water || food) away = { water, food };
+  }
+  return { stars, stage: STAGE_NAMES[idx], stageKey: ['baby', 'young', 'adult'][idx], away };
+}
+const awayWhat = a => a.water && a.food ? 'воды и еды' : a.water ? 'воды' : 'еды';
+const awayFix = a => a.water && a.food ? 'выпей сегодня норму воды и нормально поешь' : a.water ? 'выпей сегодня норму воды' : 'нормально поешь сегодня';
+
 function summary(state) {
   if (!state) return null;
   const st = state.settings || {};
@@ -215,7 +239,7 @@ function summary(state) {
   return {
     pet: st.pet, petName: st.petName, date, goal: state.goals?.[date] || st.goal, today: sum(state.logs?.[date], 'ml'), last,
     food: state.food?.[date] || [], kcalGoal: st.kcalGoal, days, goalDays: level, wear: state.wear || {},
-    tasks: (state.tasks || []).filter(t => !t.deleted), notify: !!state.sub, tz: state.tz,
+    tasks: (state.tasks || []).filter(t => !t.deleted), notify: !!state.sub, tz: state.tz, pet2: petStatus(state),
     settings: {
       goal: st.goal, kcalGoal: st.kcalGoal, waterHours: st.waterHours || [11, 14, 17, 20], mealsOn: st.mealsOn !== false,
       meals: st.meals || { breakfast: '10:30', lunch: '14:30', dinner: '19:30' }, sleepStart: st.sleepStart, sleepEnd: st.sleepEnd, interval: st.interval
@@ -265,9 +289,15 @@ async function checkReminders(env) {
     const goal = state.goals?.[date] || st.goal || 2000;
     const wake = toMin(st.sleepEnd), sleep = toMin(st.sleepStart);
     const awake = ((sleep - wake + 1440) % 1440) || 1440;
+    const away = petStatus(state).away;
     for (const h of st.waterHours || [11, 14, 17, 20]) {
       if (min < h * 60 || min >= h * 60 + 55 || n.water.includes(h)) continue;
       n.water.push(h);
+      if (away && n.away !== date) {
+        n.away = date;
+        queue.push({ title, body: `${title} отправляется на поиски ${awayWhat(away)}. Чтобы вернуть, ${awayFix(away)}.`, tag: 'away', badge: 1 });
+        continue;
+      }
       if (total >= goal) continue;
       const expected = goal * Math.min(1, ((min - wake + 1440) % 1440) / awake);
       if (total < expected * 0.85) {
